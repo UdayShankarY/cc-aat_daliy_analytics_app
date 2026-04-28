@@ -22,12 +22,8 @@ export function setToken(token: string | null) {
   else localStorage.setItem(TOKEN_KEY, token);
 }
 
-function baseUrl() {
-  return (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/+$/, "") || "http://localhost:8787";
-}
-
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const url = `${baseUrl()}${path.startsWith("/") ? path : `/${path}`}`;
+  const url = `/api${path.startsWith("/") ? path : `/${path}`}`;
   const token = getToken();
   const headers = new Headers(init?.headers);
   headers.set("content-type", "application/json");
