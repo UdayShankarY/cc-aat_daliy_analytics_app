@@ -44,8 +44,11 @@ export const api = {
     return request<{ token: string; user: ApiUser }>("/auth/register", { method: "POST", body: JSON.stringify(input) });
   },
   async login(input: { email: string; password: string }) {
-    return request<{ token: string; user: ApiUser }>("/api/auth/login", { method: "POST", body: JSON.stringify(input) });
-  },
+  return request<{ token: string; user: ApiUser }>("/auth/login", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+},
   async me() {
     return request<{ user: ApiUser }>("/auth/me");
   },
