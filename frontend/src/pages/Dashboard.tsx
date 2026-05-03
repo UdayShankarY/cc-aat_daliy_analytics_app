@@ -221,10 +221,7 @@ const Dashboard = () => {
             <Sparkles className="h-5 w-5" />
           </span>
           <div className="min-w-0 flex-1">
-            <h2 className="font-display text-lg font-semibold">Predictions (JavaScript, in your browser)</h2>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Uses a linear trend fit on your last {RANGE_DAYS} days of dashboard analytics. No ML API and no backend changes — only math on data already shown above.
-            </p>
+            <h2 className="font-display text-lg font-semibold">Predictions</h2>
           </div>
         </div>
 
@@ -316,9 +313,6 @@ const Dashboard = () => {
                       </ResponsiveContainer>
                     </div>
                   )}
-                  <p className="mt-2 text-xs text-muted-foreground">
-                    Dashed segment extends the least-squares line {FORECAST_DAYS} days past your latest day ({TRACKERS[f.type].label}).
-                  </p>
                 </TabsContent>
                 );
               })}
