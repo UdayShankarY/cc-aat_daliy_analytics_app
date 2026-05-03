@@ -1,23 +1,28 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { format, parseISO, subDays, startOfDay } from "date-fns";
-import { LineChart, Line, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
-import { Download, Plus, TrendingUp, TrendingDown } from "lucide-react";
+import { format, parseISO, subDays, startOfDay, addDays } from "date-fns";
+import { LineChart, Line, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend } from "recharts";
+import { Download, Plus, TrendingUp, TrendingDown, Sparkles } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { api } from "@/lib/api";
 import AppShell from "@/components/AppShell";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { TRACKERS, TRACKER_TYPES, EntryType, EntryRecord } from "@/lib/trackers";
+import { buildForecastChartSeries, computeMetricForecasts } from "@/lib/clientMl";
 import { toast } from "@/hooks/use-toast";
 
 const RANGE_DAYS = 14;
+
+const FORECAST_DAYS = 7;
 
 const Dashboard = () => {
   const { user } = useAuth();
   const [entries, setEntries] = useState<EntryRecord[]>([]);
   const [loading, setLoading] = useState(true);
+  const [predictionTab, setPredictionTab] = useState<EntryType>("sleep");
 
   useEffect(() => {
     if (!user) return;
@@ -97,6 +102,27 @@ const Dashboard = () => {
       });
     return Array.from(map, ([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value);
   }, [entries]);
+
+  const mlForecasts = useMemo(() => computeMetricForecasts(series, TRACKER_TYPES), [series]);
+
+  const predictionTabEffective = useMemo(() => {
+    if (mlForecasts.some((f) => f.type === predictionTab)) return predictionTab;
+    return mlForecasts[0]?.type ?? predictionTab;
+  }, [mlForecasts, predictionTab]);
+
+  const futureLabels = useMemo(() => {
+    if (series.length === 0) return [];
+    const last = parseISO(series[series.length - 1]!.date);
+    return Array.from({ length: FORECAST_DAYS }, (_, i) => format(addDays(last, i + 1), "MMM d"));
+  }, [series]);
+
+  const forecastChartByType = useMemo(() => {
+    const m = new Map<EntryType, ReturnType<typeof buildForecastChartSeries>>();
+    for (const f of mlForecasts) {
+      m.set(f.type, buildForecastChartSeries(series, f.type, FORECAST_DAYS, futureLabels));
+    }
+    return m;
+  }, [series, mlForecasts, futureLabels]);
 
   const insights = useMemo(() => {
     const out: string[] = [];
@@ -187,6 +213,118 @@ const Dashboard = () => {
             <li key={i} className="text-foreground/90">{line}</li>
           ))}
         </ul>
+      </Card>
+
+      <Card className="mt-6 border-accent/40 p-6 shadow-soft">
+        <div className="flex flex-wrap items-start gap-3">
+          <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-accent/15 text-accent">
+            <Sparkles className="h-5 w-5" />
+          </span>
+          <div className="min-w-0 flex-1">
+            <h2 className="font-display text-lg font-semibold">Predictions (JavaScript, in your browser)</h2>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Uses a linear trend fit on your last {RANGE_DAYS} days of dashboard analytics. No ML API and no backend changes — only math on data already shown above.
+            </p>
+          </div>
+        </div>
+
+        {loading ? (
+          <Skeleton className="mt-6 h-72 w-full" />
+        ) : entries.length === 0 || mlForecasts.length === 0 ? (
+          <p className="mt-6 text-sm text-muted-foreground">
+            Log a few days of activity to unlock next-day and 7-day-ahead estimates.
+          </p>
+        ) : (
+          <div className="mt-6 space-y-6">
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              {mlForecasts.map((f) => {
+                const cfg = TRACKERS[f.type];
+                const next =
+                  f.type === "expense"
+                    ? `$${f.nextDay.toFixed(2)}`
+                    : `${f.nextDay.toFixed(1)}${cfg.unit}`;
+                const week =
+                  f.type === "expense"
+                    ? `$${f.next7DaySum.toFixed(2)}`
+                    : `${f.next7DaySum.toFixed(1)}${cfg.unit}`;
+                return (
+                  <div
+                    key={f.type}
+                    className="rounded-lg border border-border/80 bg-secondary/30 px-4 py-3 text-sm"
+                  >
+                    <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                      {cfg.emoji} {cfg.label}
+                    </div>
+                    <div className="mt-1 font-semibold">Tomorrow (est.): {next}</div>
+                    <div className="text-xs text-muted-foreground">
+                      Next 7 days (sum): {week} · fit R² {(f.r2 * 100).toFixed(0)}%
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            <Tabs value={predictionTabEffective} onValueChange={(v) => setPredictionTab(v as EntryType)}>
+              <TabsList className="flex w-full flex-wrap justify-start gap-1 bg-muted/50 p-1 h-auto min-h-10">
+                {mlForecasts.map((f) => (
+                  <TabsTrigger key={f.type} value={f.type} className="gap-1">
+                    {TRACKERS[f.type].emoji} {TRACKERS[f.type].label}
+                  </TabsTrigger>
+                ))}
+              </TabsList>
+              {mlForecasts.map((f) => {
+                const chartRows = forecastChartByType.get(f.type) ?? [];
+                return (
+                <TabsContent key={f.type} value={f.type} className="mt-4">
+                  {chartRows.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">Not enough variation to plot a trend.</p>
+                  ) : (
+                    <div className="h-72">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <LineChart data={chartRows}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                          <XAxis dataKey="label" stroke="hsl(var(--muted-foreground))" fontSize={11} interval="preserveStartEnd" angle={-30} textAnchor="end" height={48} />
+                          <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} />
+                          <Tooltip
+                            contentStyle={{
+                              background: "hsl(var(--card))",
+                              border: "1px solid hsl(var(--border))",
+                              borderRadius: 12,
+                            }}
+                          />
+                          <Legend />
+                          <Line
+                            type="monotone"
+                            dataKey="actual"
+                            name="Actual"
+                            stroke={TRACKERS[f.type].colorVar}
+                            strokeWidth={2}
+                            dot={{ r: 3 }}
+                            connectNulls={false}
+                          />
+                          <Line
+                            type="monotone"
+                            dataKey="predicted"
+                            name="Trend + forecast"
+                            stroke={TRACKERS[f.type].colorVar}
+                            strokeWidth={2}
+                            strokeDasharray="6 4"
+                            dot={{ r: 3 }}
+                            connectNulls
+                          />
+                        </LineChart>
+                      </ResponsiveContainer>
+                    </div>
+                  )}
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    Dashed segment extends the least-squares line {FORECAST_DAYS} days past your latest day ({TRACKERS[f.type].label}).
+                  </p>
+                </TabsContent>
+                );
+              })}
+            </Tabs>
+          </div>
+        )}
       </Card>
 
       {/* Charts */}
